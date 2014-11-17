@@ -8,12 +8,9 @@
         Wendeurick Silverio - Eng. Elétrica @UFPR
 
     A fazer:
-        - verificar o tempo do percurso e demais variáveis
+        - formatação do tempo: hh:mm:ss
         - display SPI
-        - botões
-        - função pausa
         - traduzir para o inglês (?)
-        - biblioteca <string.h> realmente é necessária? strcat()
         - comentar as funções
 */
 
@@ -27,23 +24,41 @@ void Serial_escreve_texto(char *caracter);
 void itoa(long unsigned int inteiro, char* string);
 void ftoa(float n, char *res, int casas);
 float _pow(float base, float expoente);
+void delay_ms(unsigned int ms);
 
 // definição das constantes
+// menu
+#define NOTIFICACAO 0
+#define DATA_LOGGER 1
+// bicicleta
 #define R 0.45
 #define PI 3.1416
-
-#define SENSOR BIT3 // sensor conectado ao P1.3
+#define CIRC 1000.0 * 2 * PI * R // 1000: dt -> ms
+// periféricos
+#define BOTAO BIT3 // botao conectado ao pino P1.3
+#define SENSOR BIT4 // sensor conectado ao P1.4
+#define CHAVE BIT5 // chave conectada ao P1.5
 #define LED0 BIT0 // led vermelho conectado ao P1.0
 #define LED1 BIT6 // led verde conectado ao P1.6
 #define RX_pin BIT1 // pino de recepção serial P1.1
 #define TX_pin BIT2 // pino de transmissão serialP1.2
 
 // definição das variáveis
-unsigned int voltas = 0; // número de voltas da roda
-unsigned int dt = 0; // intervalo de tempo 'dt'
-unsigned int tempo = 0; // tempo percorrido, em ms
+float vel = 0;
+unsigned int voltas = 0; // número de voltas da roda; reset em 65535 ~= 185km
+unsigned int dt = 0; // intervalo de tempo 'dt'; reset em ~= 65s
+unsigned long tempo = 0; // tempo percorrido, em ms; reset em ~= 50 dias
+unsigned char timeout = 0; // timeout para a velocidade
+
+unsigned char menu = DATA_LOGGER;
+unsigned char pausa = 1;
 
 char valor_str[10]; // string de uso geral
+
+char notificacao[84]; // 6*14
+char *string = notificacao;
+
+unsigned char notif_receive = 0; // indicador de "pronto para nova notificação"
 
 void main(void){
       
@@ -57,14 +72,14 @@ void main(void){
     // configura as saídas do P1
     P1DIR = LED0 + LED1;
 
-    // habilita o resistor pullup no sensor
-    P1REN = SENSOR;
+    // habilita o resistor pullup
+    P1REN = SENSOR + BOTAO + CHAVE;
     
-    // ativa o resistor pullup e acende o led vermelho
-    P1OUT |= SENSOR + LED0;
+    // ativa o resistor
+    P1OUT = SENSOR + BOTAO + CHAVE;
     
-    // configura a interrupção por borda de descida no sensor
-    P1IE = P1IES = SENSOR;
+    // configura a interrupção por borda de descida
+    P1IE = P1IES = SENSOR + BOTAO;
     
     // limpa as interrupções do P1
     P1IFG = 0;
@@ -77,78 +92,154 @@ void main(void){
     // configura a comunicação serial uart
     // 9600 bps, 8 bits, sem paridade
     Serial_config();
-    
+
+    // LCD print pressione o botao
+    // Aguarda o usuário
+    while(P1IN & BOTAO);
+
+    // Pisca os leds
+    for (char i = 0; i < 5; ++i){
+        P1OUT |= LED0 + LED1;
+        delay_ms(100);
+        P1OUT &= ~(LED0 + LED1);
+        delay_ms(100);
+    }
+
     // habilita as interrupções
     __enable_interrupt();
 
-    while(1);
+    // solicita nova notificação
+    Serial_escreve_dado('1');
+
+    // loop
+    while(1){
+        if (menu == NOTIFICACAO && !(P1IN & CHAVE)){
+            if (notif_receive){ // notificação recebida
+                Serial_escreve_texto(notificacao);
+                notif_receive = 0;
+				string = notificacao; // retorna o ponteiro para a primeira posição
+            }
+        }else if (menu == DATA_LOGGER && !pausa){
+			
+			if(timeout > 5){
+                // zera a velocidade após 5s se não houver leitura do sensor
+				vel = timeout = 0;
+			}
+            
+			// cálculo da velocidade média
+            float vel_med = CIRC * (voltas)/tempo;
+        
+            // envia pela UART o valor da velocidade instantânea
+            Serial_escreve_texto("\n\nvel: ");
+            ftoa(vel, valor_str, 2);
+            Serial_escreve_texto(valor_str);
+
+            // envia pela UART o valor da velocidade média
+            Serial_escreve_texto("\nvmed: ");
+            ftoa(vel_med, valor_str, 2);
+            Serial_escreve_texto(valor_str);
+
+            // envia pela UART o valor da distância percorrida (em m)
+            Serial_escreve_texto("\ndist: ");
+            ftoa(CIRC * voltas / 1000.0, valor_str, 2);
+            Serial_escreve_texto(valor_str);
+        
+            // envia pela UART o valor do tempo percorrido (em s)
+            Serial_escreve_texto("\ntempo: ");
+            itoa(tempo/1000, valor_str);
+            Serial_escreve_texto(valor_str);
+			
+            // alterna o led verde
+            P1OUT ^= LED1;
+            delay_ms(1000);            
+        }
+    }
 }
 
 /* rotina de interrupção do P1 */
-#pragma vector = PORT1_VECTOR
-__interrupt void int_P1(void){
+__attribute__((interrupt(PORT1_VECTOR)))
+void int_P1(void){
+//#pragma vector = PORT1_VECTOR
+//__interrupt void int_P1(void){
 
     // interrupção do sensor
-    if(P1IFG & SENSOR){
-    
+    if(P1IFG & SENSOR && !pausa){
+        
         // cálculo da velocidade instantânea
-        float vel = 1000 * 2 * PI * R/dt;
+        vel = CIRC/dt;
         dt = 0;
-        
-        // cálculo da velocidade média
-        float vel_med = 1000 * 2 * PI * R * (++voltas)/tempo; // 2 * 1000ms
-        
-        // envia pela UART o valor da velocidade instantânea
-        Serial_escreve_texto("\n\nvel: ");
-        ftoa(vel, valor_str, 2);
-        Serial_escreve_texto(valor_str);
+		
+		voltas++;
+		
+		timeout = 0;
 
-        // envia pela UART o valor da velocidade média
-        Serial_escreve_texto("\nvmed: ");
-        ftoa(vel_med, valor_str, 2);
-        Serial_escreve_texto(valor_str);
-
-        // envia pela UART o valor da distância percorrida (em m)
-        Serial_escreve_texto("\ndist: ");
-        ftoa(2 * PI * R * voltas, valor_str, 2);
-        Serial_escreve_texto(valor_str);
-        
-        // envia pela UART o valor do tempo percorrido (em s)
-        Serial_escreve_texto("\ntempo: ");
-        itoa(tempo/1000, valor_str);
-        Serial_escreve_texto(valor_str);
-
-        // debouncing (remover após os testes)
-        __delay_cycles(8000); // 1ms
-        while(!(P1IN & SENSOR));
-        __delay_cycles(8000);
-
-        // inverte os led
-        P1OUT ^= LED1 + LED0;
-
+        // debouncing
+        //__delay_cycles(8000); // 1ms
+        //while(!(P1IN & SENSOR));
+        //__delay_cycles(8000);
+                
         // limpa flag de interrupção do sensor
         P1IFG &= ~SENSOR;
+
+    }else if(P1IFG & BOTAO){
+
+        if (menu == DATA_LOGGER){
+            // inverte a 'pausa' e o led indicador
+            P1OUT = (pausa = !pausa)?(P1OUT & ~LED0):(P1OUT | LED0);
+
+        }else if(menu == NOTIFICACAO){
+            // LCD limpa tela
+
+            menu = DATA_LOGGER;
+            
+            // solicita nova notificação
+            Serial_escreve_dado('1');
+        }
+
+        __delay_cycles(8000); // 1ms
+        while(!(P1IN & BOTAO));
+        __delay_cycles(8000);
+
+        P1IFG &= ~BOTAO;
     }
 }
 
 /* rotina de interrupção do Timer A0, chamada a cada 1ms */
-#pragma vector = TIMER0_A0_VECTOR
-__interrupt void int_timer_A(void){
+__attribute__((interrupt(TIMER0_A0_VECTOR)))
+void int_timer_A(void){
+//#pragma vector = TIMER0_A0_VECTOR
+//__interrupt void int_timer_A(void){
 
-    dt++;
-    tempo++;
+    if(!pausa){
+        dt++;
+        tempo++;
+		
+		if(!(tempo % 1000)) timeout++; // incrementa a cada 1s
+    }
 
     // limpa flag de imterrupção do timer A0
     TACCTL0 &= ~CCIFG;
 }
 
 /* rotina de interrupção da serial, chamada a cada byte recebido */
-#pragma vector = USCIAB0RX_VECTOR
-__interrupt void Serial_receive(void){
-
+__attribute__((interrupt(USCIAB0RX_VECTOR)))
+void Serial_receive(void){
+//#pragma vector = USCIAB0RX_VECTOR
+//__interrupt void Serial_receive(void){
     // lê o dado recebido
     char dado = UCA0RXBUF;
-        
+
+    if (menu == NOTIFICACAO){
+        if (dado == '\0'){ // fim da notificação
+            notif_receive = 1;
+			*string = '\0';
+		}else{
+			*string = dado; // concatena o caracter
+			string++;
+		}
+    }
+		
+	//if(!(P1IN & CHAVE)) menu = NOTIFICACAO; //*******************
 }
 
 /* configuração da UART */
@@ -251,4 +342,10 @@ float _pow(float base, float expoente){
     float n = base;
     while(--expoente) n *= base;
     return n;
+}
+
+void delay_ms(unsigned int ms) {
+    while (ms--) {
+        __delay_cycles(8000);
+    }
 }
