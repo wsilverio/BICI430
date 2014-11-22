@@ -5,7 +5,10 @@
 
     A fazer:
         - formatação do tempo: hh:mm:ss
-    - receber a string de notificação pela serial
+        - receber a string de notificação pela serial
+        - pausa por botao
+        - controle da luz de fundo (PWM ?)
+        - controle do contraste (?)
 */
 
 #include <msp430.h>
@@ -193,7 +196,7 @@ unsigned char timeout = 0; // timeout para a velocidade, expira em 3s
 
 // variáveis de menu
 unsigned char menu = DATA_LOGGER;
-unsigned char pausa = 1;
+unsigned char trava = 0; // travaBotao, travaTimeout | 1: trava ON
 
 char valor_str[10]; // string de uso geral
 
@@ -263,11 +266,13 @@ void main(void){
     while(1){ // loop
         if (menu == NOTIFICACAO){
             // ...
-        }else if (menu == DATA_LOGGER && !pausa){
+        }else if (menu == DATA_LOGGER && !trava){
             
             if(timeout > 3){
                 // zera a velocidade após 3s se não houver leitura do sensor
                 vel = timeout = 0;
+                // pausa
+                trava = 1;
             }
             
             LCDNokia_clear(WHITE);
@@ -309,18 +314,20 @@ void main(void){
     }
 }
 
-#pragma vector = PORT1_VECTOR
-__interrupt void int_P1(void){
-//__attribute__((interrupt(PORT1_VECTOR)))
-//void int_P1(void){
+//#pragma vector = PORT1_VECTOR
+//__interrupt void int_P1(void){
+__attribute__((interrupt(PORT1_VECTOR)))
+void int_P1(void){
 
     // interrupção do sensor
-    if(P1IFG & SENSOR && !pausa){
+    if(P1IFG & SENSOR){
         // cálculo da velocidade instantânea
         vel = CIRC/dt;
         dt = 0;
         voltas++;
         timeout = 0;
+
+        trava = 0;
 
         // debouncing
         //__delay_cycles(8000); // 1ms
@@ -333,8 +340,8 @@ __interrupt void int_P1(void){
     }else if(P1IFG & BOTAO){ // interrupção do botao
 
         if (menu == DATA_LOGGER){
-            // inverte a 'pausa' e o led indicador
-            P1OUT = (pausa = !pausa)?(P1OUT & ~LED1):(P1OUT | LED1);
+            // inverte a 'trava' e o led indicador
+            //P1OUT = (trava = !trava)?(P1OUT & ~LED1):(P1OUT | LED1);
 
         }else if(menu == NOTIFICACAO){
             // limpa a notificacao
@@ -355,12 +362,12 @@ __interrupt void int_P1(void){
     }
 }
 
-#pragma vector = TIMER0_A0_VECTOR
-__interrupt void int_timer_A(void){
-//__attribute__((interrupt(TIMER0_A0_VECTOR)))
-//void int_timer_A(void){
+//#pragma vector = TIMER0_A0_VECTOR
+//__interrupt void int_timer_A(void){
+__attribute__((interrupt(TIMER0_A0_VECTOR)))
+void int_timer_A(void){
 
-    if(!pausa){
+    if(!trava){
         // atualiza as variáveis
         dt++;
         tempo++;
@@ -373,10 +380,10 @@ __interrupt void int_timer_A(void){
     TACCTL0 &= ~CCIFG;
 }
 
-#pragma vector = USCIAB0RX_VECTOR
-__interrupt void Serial_receive(void){
-//__attribute__((interrupt(USCIAB0RX_VECTOR)))
-//void Serial_receive(void){
+//#pragma vector = USCIAB0RX_VECTOR
+//__interrupt void Serial_receive(void){
+__attribute__((interrupt(USCIAB0RX_VECTOR)))
+void Serial_receive(void){
     // lê o dado recebido e aciona o display
     print_notificacao(UCA0RXBUF);
 }
