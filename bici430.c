@@ -3,6 +3,10 @@
     Projeto BICI430
     registrador de dados para bicicletas, integrado a um celular móvel
 
+    Autores:
+        - Marilson Reque - Física @UFPR
+        - Wendeurick Silverio - Eng. Elétrica @UFPR
+
     A fazer:
         - formatação do tempo: hh:mm:ss
         - receber a string de notificação pela serial
@@ -266,9 +270,9 @@ void main(void){
     while(1){ // loop
         if (menu == NOTIFICACAO){
             // ...
-        }else if (menu == DATA_LOGGER && !trava){
+        }else if (menu == DATA_LOGGER){// && !trava){
             
-            if(timeout > 3){
+            if(timeout >= 3){
                 // zera a velocidade após 3s se não houver leitura do sensor
                 vel = timeout = 0;
                 // pausa
@@ -497,7 +501,6 @@ void LCDNokia_poscursor(char x, char y){
 }
 
 void itoa(long unsigned int inteiro, char* string){
-    // baseada em http://www.strudel.org.uk/itoa/
     
     char* ptr = string, *ptr1 = string, tmp_char;
     int tmp_inteiro;
@@ -520,7 +523,6 @@ void itoa(long unsigned int inteiro, char* string){
 }
 
 void ftoa(float n, char *res, int casas){
-    // baseada em http://www.geeksforgeeks.org/convert-floating-point-number-string/
     // parte inteira do número
     int iparte = (int) n;
     // parte flutuante (após a vírgula)
